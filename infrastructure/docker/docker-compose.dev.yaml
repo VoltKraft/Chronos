@@ -1,14 +1,20 @@
+name: chronos-dev
+
 networks:
   backend:
+    name: chronos_backend
   frontend:
+    name: chronos_frontend
 
+volumes:
+  chronos_db_dev:
 
 services:
   db:
     image: postgres:18
     container_name: chronos_db_dev
     networks:
-    - backend
+      - backend
     ports:
       - "127.0.0.1:5432:5432"
     env_file:
@@ -19,10 +25,87 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - chronos_db_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
+
+  api:
+    build:
+      context: ../../services/api
+    image: chronos_api:dev
+    container_name: chronos_api_dev
+    networks:
+      - backend
+      - frontend
+    env_file:
+      - .env.dev
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      SESSION_SECRET: ${SESSION_SECRET}
+      COOKIE_NAME: ${COOKIE_NAME}
+      COOKIE_SECURE: ${COOKIE_SECURE}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE}
+      SESSION_MAX_AGE_SECONDS: ${SESSION_MAX_AGE_SECONDS}
+      LOG_LEVEL: ${LOG_LEVEL}
+    depends_on:
+      db:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=chronos_frontend"
+      - "traefik.http.routers.chronos-api.rule=Host(`${PUBLIC_HOST}`) && (PathPrefix(`/api`) || PathPrefix(`/auth`))"
+      - "traefik.http.routers.chronos-api.entrypoints=web"
+      - "traefik.http.services.chronos-api.loadbalancer.server.port=8000"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../../services/worker
+    image: chronos_worker:dev
+    container_name: chronos_worker_dev
+    networks:
+      - backend
+    env_file:
+      - .env.dev
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JOB_POLL_INTERVAL_SECONDS: ${JOB_POLL_INTERVAL_SECONDS}
+      LOG_LEVEL: ${LOG_LEVEL}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
-    image: chronos_frontend:latest
-    container_name: chronos_frontend
+    build:
+      context: ../../services/frontend
+    image: chronos_frontend:dev
+    container_name: chronos_frontend_dev
     networks:
       - frontend
+    depends_on:
+      - api
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=chronos_frontend"
+      - "traefik.http.routers.chronos-fe.rule=Host(`${PUBLIC_HOST}`)"
+      - "traefik.http.routers.chronos-fe.entrypoints=web"
+      - "traefik.http.routers.chronos-fe.priority=1"
+      - "traefik.http.services.chronos-fe.loadbalancer.server.port=80"
+    restart: unless-stopped
+
+  reverse-proxy:
+    image: traefik:v3.2
+    container_name: chronos_traefik_dev
+    networks:
+      - frontend
+    ports:
+      - "80:80"
+      - "127.0.0.1:8080:8080"  # Traefik dashboard (dev only)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yaml:/etc/traefik/traefik.yaml:ro
     restart: unless-stopped

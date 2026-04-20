@@ -1,14 +1,20 @@
+name: chronos
+
 networks:
   backend:
+    name: chronos_backend
   frontend:
+    name: chronos_frontend
 
+volumes:
+  chronos_db:
 
 services:
   db:
     image: postgres:18
     container_name: chronos_db
     networks:
-    - backend
+      - backend
     env_file:
       - .env
     environment:
@@ -17,10 +23,85 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - chronos_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
+
+  api:
+    image: chronos_api:latest_stable
+    container_name: chronos_api
+    networks:
+      - backend
+      - frontend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      SESSION_SECRET: ${SESSION_SECRET}
+      COOKIE_NAME: ${COOKIE_NAME}
+      COOKIE_SECURE: "true"
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE}
+      SESSION_MAX_AGE_SECONDS: ${SESSION_MAX_AGE_SECONDS}
+      LOG_LEVEL: ${LOG_LEVEL}
+    depends_on:
+      db:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=chronos_frontend"
+      - "traefik.http.routers.chronos-api.rule=Host(`${PUBLIC_HOST}`) && (PathPrefix(`/api`) || PathPrefix(`/auth`))"
+      - "traefik.http.routers.chronos-api.entrypoints=websecure"
+      - "traefik.http.routers.chronos-api.tls=true"
+      - "traefik.http.services.chronos-api.loadbalancer.server.port=8000"
+    restart: unless-stopped
+
+  worker:
+    image: chronos_worker:latest_stable
+    container_name: chronos_worker
+    networks:
+      - backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JOB_POLL_INTERVAL_SECONDS: ${JOB_POLL_INTERVAL_SECONDS}
+      LOG_LEVEL: ${LOG_LEVEL}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
     image: chronos_frontend:latest_stable
     container_name: chronos_frontend
     networks:
       - frontend
+    depends_on:
+      - api
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=chronos_frontend"
+      - "traefik.http.routers.chronos-fe.rule=Host(`${PUBLIC_HOST}`)"
+      - "traefik.http.routers.chronos-fe.entrypoints=websecure"
+      - "traefik.http.routers.chronos-fe.tls=true"
+      - "traefik.http.routers.chronos-fe.priority=1"
+      - "traefik.http.services.chronos-fe.loadbalancer.server.port=80"
+    restart: unless-stopped
+
+  reverse-proxy:
+    image: traefik:v3.2
+    container_name: chronos_traefik
+    networks:
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yaml:/etc/traefik/traefik.yaml:ro
+      # Production TLS certs must be mounted here; configure acme or cert files via
+      # a prod-specific traefik config overlay before enabling websecure.
     restart: unless-stopped

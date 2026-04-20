@@ -1,0 +1,20 @@
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: chronos_frontend
+
+api:
+  dashboard: true
+  insecure: true  # dev only; disable in prod
+
+log:
+  level: INFO
+accessLog: {}
+
+ping: {}

@@ -1,0 +1,18 @@
+[project]
+name = "chronos-worker"
+version = "0.1.0"
+description = "Chronos scheduler/worker service"
+requires-python = ">=3.12"
+dependencies = [
+  "sqlalchemy>=2.0.36",
+  "psycopg[binary]>=3.2",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.6",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]

@@ -83,6 +83,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserPublic'
+  /auth/csrf-token:
+    get:
+      tags:
+      - auth
+      summary: Csrf Token
+      description: 'Return the session''s CSRF token, minting one if necessary.
+
+
+        Protected by ``current_user`` so only authenticated sessions can obtain a
+
+        token. ``ensure_csrf_token`` writes the secret back into the session on
+
+        first read, so subsequent calls return the same value until logout.'
+      operationId: csrf_token_auth_csrf_token_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsrfTokenResponse'
   /api/users:
     get:
       tags:
@@ -247,6 +268,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/users/me/password:
+    post:
+      tags:
+      - users
+      summary: Change My Password
+      description: 'H-04: self-service rotation.
+
+
+        Verifies the current password, enforces the policy on the new one, and
+
+        stamps ``password_changed_at`` + clears ``must_rotate_password`` so the
+
+        forced-rotate banner goes away. Emits an audit event in the same
+
+        transaction.'
+      operationId: change_my_password_api_users_me_password_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelfPasswordChange'
+        required: true
+      responses:
+        '204':
+          description: Successful Response
         '422':
           description: Validation Error
           content:
@@ -1754,6 +1806,15 @@ components:
       - prev_hash
       - row_hash
       title: AuditOut
+    CsrfTokenResponse:
+      properties:
+        csrf_token:
+          type: string
+          title: Csrf Token
+      type: object
+      required:
+      - csrf_token
+      title: CsrfTokenResponse
     DecisionBody:
       properties:
         reason:
@@ -2289,6 +2350,21 @@ components:
       required:
       - role
       title: RoleChange
+    SelfPasswordChange:
+      properties:
+        current_password:
+          type: string
+          minLength: 1
+          title: Current Password
+        new_password:
+          type: string
+          minLength: 8
+          title: New Password
+      type: object
+      required:
+      - current_password
+      - new_password
+      title: SelfPasswordChange
     ShiftIn:
       properties:
         team_id:
@@ -2566,6 +2642,10 @@ components:
             format: uuid
           - type: 'null'
           title: Team Id
+        must_rotate_password:
+          type: boolean
+          title: Must Rotate Password
+          default: false
         created_at:
           type: string
           format: date-time
@@ -2624,6 +2704,10 @@ components:
             format: uuid
           - type: 'null'
           title: Team Id
+        must_rotate_password:
+          type: boolean
+          title: Must Rotate Password
+          default: false
       type: object
       required:
       - id

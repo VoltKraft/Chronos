@@ -1,6 +1,8 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, String
+import sqlalchemy as sa
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,6 +21,17 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="employee")
     locale: Mapped[str] = mapped_column(String(10), nullable=False, default="en")
     time_zone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
+
+    failed_login_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # H-04: password-policy + forced-rotation metadata.
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    must_rotate_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.text("false")
+    )
 
     department_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), index=True

@@ -19,10 +19,16 @@ from app.permissions import (
 )
 from app.routers.auth import UserPublic
 from app.schemas import Email
-from app.security import hash_password
+from app.security import hash_password, validate_password_strength, verify_password
 from app.services import audit
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+def _serialise(value):
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    return value
 
 
 class UserCreate(BaseModel):
@@ -52,6 +58,11 @@ class RoleChange(BaseModel):
 
 
 class PasswordUpdate(BaseModel):
+    new_password: str = Field(min_length=8)
+
+
+class SelfPasswordChange(BaseModel):
+    current_password: str = Field(min_length=1)
     new_password: str = Field(min_length=8)
 
 
@@ -138,8 +149,21 @@ def update_user(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
     if (payload.department_id is not None or payload.team_id is not None) and not is_hr_or_admin(actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="only HR/admin can move users")
-    for key, value in payload.model_dump(exclude_none=True).items():
-        setattr(user, key, value)
+    changes = payload.model_dump(exclude_none=True)
+    if changes:
+        before = {key: _serialise(getattr(user, key)) for key in changes}
+        for key, value in changes.items():
+            setattr(user, key, value)
+        after = {key: _serialise(getattr(user, key)) for key in changes}
+        audit.append(
+            db,
+            actor=actor,
+            action=AuditAction.config_change,
+            target_type="user",
+            target_id=user.id,
+            before=before,
+            after=after,
+        )
     db.commit()
     db.refresh(user)
     return user
@@ -172,6 +196,41 @@ def set_role(
     return user
 
 
+@router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+def change_my_password(
+    payload: SelfPasswordChange,
+    db: Session = Depends(get_db),
+    actor: User = Depends(current_user),
+) -> None:
+    """H-04: self-service rotation.
+
+    Verifies the current password, enforces the policy on the new one, and
+    stamps ``password_changed_at`` + clears ``must_rotate_password`` so the
+    forced-rotate banner goes away. Emits an audit event in the same
+    transaction.
+    """
+    if not verify_password(payload.current_password, actor.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="current password mismatch"
+        )
+    try:
+        validate_password_strength(payload.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    actor.password_hash = hash_password(payload.new_password)
+    actor.password_changed_at = datetime.now(timezone.utc)
+    actor.must_rotate_password = False
+    audit.append(
+        db,
+        actor=actor,
+        action="user.password.changed",
+        target_type="user",
+        target_id=actor.id,
+    )
+    db.commit()
+
+
 @router.put("/{user_id}/password", status_code=status.HTTP_204_NO_CONTENT)
 def set_password(
     user_id: uuid.UUID,
@@ -184,7 +243,20 @@ def set_password(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
     if user.id != actor.id and not is_admin(actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+    try:
+        validate_password_strength(payload.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     user.password_hash = hash_password(payload.new_password)
+    user.password_changed_at = datetime.now(timezone.utc)
+    user.must_rotate_password = False
+    audit.append(
+        db,
+        actor=actor,
+        action="user.password.changed",
+        target_type="user",
+        target_id=user.id,
+    )
     db.commit()
 
 

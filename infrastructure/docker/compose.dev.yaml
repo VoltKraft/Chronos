@@ -94,6 +94,6 @@ services:
       - "80:80"
       - "127.0.0.1:8080:8080"  # Traefik dashboard (dev only)
     volumes:
-      - ./traefik/traefik.yaml:/etc/traefik/traefik.yaml:ro
+      - ./traefik/traefik.dev.yaml:/etc/traefik/traefik.yaml:ro
       - ./traefik/dynamic.dev:/etc/traefik/dynamic:ro
     restart: unless-stopped

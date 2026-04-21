@@ -8,6 +8,8 @@ networks:
 
 volumes:
   chronos_db:
+  chronos_traefik_acme:
+  chronos_traefik_dynamic:
 
 services:
   db:
@@ -16,7 +18,7 @@ services:
     networks:
       - backend
     env_file:
-      - .env
+      - .env.prod
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -38,8 +40,9 @@ services:
       - backend
       - frontend
     env_file:
-      - .env
+      - .env.prod
     environment:
+      ENV: ${ENV:-prod}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       SESSION_SECRET: ${SESSION_SECRET}
       COOKIE_NAME: ${COOKIE_NAME}
@@ -58,7 +61,7 @@ services:
     networks:
       - backend
     env_file:
-      - .env
+      - .env.prod
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       JOB_POLL_INTERVAL_SECONDS: ${JOB_POLL_INTERVAL_SECONDS}
@@ -77,6 +80,29 @@ services:
       - api
     restart: unless-stopped
 
+  # Init container: expand ${PUBLIC_HOST} inside the Traefik dynamic config
+  # template, drop the rendered YAML into a shared volume, then exit. Traefik
+  # only starts after this service reports completed_successfully.
+  traefik-config:
+    image: alpine:3.19
+    container_name: chronos_traefik_config
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?PUBLIC_HOST must be set in .env for prod (rejects requests with any other Host header)}
+    volumes:
+      - ./traefik/dynamic.prod:/templates:ro
+      - chronos_traefik_dynamic:/rendered
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        apk add --no-cache gettext >/dev/null
+        envsubst '$${PUBLIC_HOST}' \
+          < /templates/services.yaml.template \
+          > /rendered/services.yaml
+        echo "rendered services.yaml for PUBLIC_HOST=$$PUBLIC_HOST"
+    restart: "no"
+
   reverse-proxy:
     image: traefik:v3.2
     container_name: chronos_traefik
@@ -86,8 +112,18 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./traefik/traefik.yaml:/etc/traefik/traefik.yaml:ro
-      - ./traefik/dynamic.prod:/etc/traefik/dynamic:ro
-      # Production TLS certs must be mounted here; configure acme or cert files via
-      # a prod-specific traefik config overlay before enabling websecure.
+      - ./traefik/traefik.prod.yaml:/etc/traefik/traefik.yaml:ro
+      - chronos_traefik_dynamic:/etc/traefik/dynamic:ro
+      - chronos_traefik_acme:/acme
+    command:
+      # ACME (Let's Encrypt) cert resolver configured via CLI so values can come
+      # from env. Flip ACME_CA_SERVER between staging and prod in .env.
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:?ACME_EMAIL must be set in .env for prod}
+      - --certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.letsencrypt.acme.caserver=${ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
+    depends_on:
+      traefik-config:
+        condition: service_completed_successfully
     restart: unless-stopped

@@ -1,9 +1,12 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
+from app.csrf import CSRFMiddleware
 from app.routers import (
     audit,
     auth,
@@ -20,6 +23,7 @@ from app.routers import (
     users,
     workflows,
 )
+from app.services.auth_rate_limit import limiter
 
 logging.basicConfig(level=settings.log_level.upper())
 
@@ -28,6 +32,23 @@ app = FastAPI(
     version="0.2.0",
     description="Shift, leave, and sickness planning — FS Phase 1 implementation.",
 )
+
+
+def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"})
+
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
+
+# H-10: CSRF enforcement for unsafe methods.
+#
+# Starlette's ``add_middleware`` inserts at the head of ``user_middleware`` and
+# builds the ASGI stack in reversed order, so the LAST middleware added runs
+# first on the request. CSRFMiddleware reads ``request.session``, which means
+# ``SessionMiddleware`` must be the outer layer -- i.e. added AFTER this one.
+# Keep the order: CSRFMiddleware first, SessionMiddleware second.
+app.add_middleware(CSRFMiddleware)
 
 app.add_middleware(
     SessionMiddleware,

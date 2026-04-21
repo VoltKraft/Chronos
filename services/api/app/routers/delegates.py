@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import current_user
 from app.models import Delegate, User
+from app.models.enums import AuditAction
 from app.permissions import is_hr_or_admin
+from app.services import audit
 
 router = APIRouter(prefix="/api/delegates", tags=["delegates"])
 
@@ -68,6 +70,20 @@ def create_delegate(
         valid_to=payload.valid_to,
     )
     db.add(d)
+    db.flush()
+    audit.append(
+        db,
+        actor=viewer,
+        action=AuditAction.config_change,
+        target_type="delegate",
+        target_id=d.id,
+        after={
+            "principal_id": str(d.principal_id),
+            "delegate_user_id": str(d.delegate_user_id),
+            "valid_from": d.valid_from.isoformat(),
+            "valid_to": d.valid_to.isoformat(),
+        },
+    )
     db.commit()
     db.refresh(d)
     return d
@@ -85,4 +101,15 @@ def delete_delegate(
     if d.principal_id != viewer.id and not is_hr_or_admin(viewer):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
     d.deleted_at = datetime.now(timezone.utc)
+    audit.append(
+        db,
+        actor=viewer,
+        action=AuditAction.config_change,
+        target_type="delegate",
+        target_id=d.id,
+        before={
+            "principal_id": str(d.principal_id),
+            "delegate_user_id": str(d.delegate_user_id),
+        },
+    )
     db.commit()

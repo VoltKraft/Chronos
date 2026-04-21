@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
@@ -63,7 +63,7 @@ def export_user_data(
     ]
     payload = {
         "schema_version": "1",
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "profile": profile,
         "leave_requests": leave,
         "preferences": preferences,

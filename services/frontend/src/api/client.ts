@@ -10,10 +10,52 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+// H-10: CSRF token cache. Populated lazily on the first unsafe request or
+// immediately after login; cleared on logout and whenever the server rejects
+// a request because the cached token doesn't match its session copy.
+let csrfToken: string | null = null;
+
+const CSRF_HEADER = "X-CSRF-Token";
+const CSRF_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const CSRF_RETRYABLE_DETAILS = new Set([
+  "CSRF token mismatch",
+  "CSRF token missing in session",
+]);
+
+async function getCsrfToken(): Promise<string> {
+  if (csrfToken) return csrfToken;
+  const res = await fetch(`${base}/auth/csrf-token`, { credentials: "include" });
+  if (!res.ok) {
+    // Let the caller surface the underlying reason (likely a 401 from
+    // current_user) by throwing an ApiError with the server's detail.
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      // non-JSON body
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const body = (await res.json()) as { csrf_token: string };
+  csrfToken = body.csrf_token;
+  return csrfToken;
+}
+
+async function request<T>(path: string, init: RequestInit = {}, _retry = false): Promise<T> {
   const headers: Record<string, string> = {};
   if (init.body && !(init.body instanceof FormData)) {
     headers["content-type"] = "application/json";
+  }
+  const method = (init.method ?? "GET").toUpperCase();
+  if (!CSRF_SAFE_METHODS.has(method)) {
+    // Attach the CSRF token on every state-changing request. We skip
+    // /auth/login because it creates the session that holds the token in
+    // the first place; the server exempts it from the check.
+    if (path !== "/auth/login") {
+      const token = await getCsrfToken();
+      headers[CSRF_HEADER] = token;
+    }
   }
   const res = await fetch(`${base}${path}`, {
     credentials: "include",
@@ -27,6 +69,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
     } catch {
       // non-JSON body
+    }
+    // If the server rejected us because the cached CSRF token is stale
+    // (e.g. the session was rotated server-side after a re-auth), drop the
+    // cache and retry once transparently.
+    if (res.status === 403 && !_retry && CSRF_RETRYABLE_DETAILS.has(detail)) {
+      csrfToken = null;
+      return request<T>(path, init, true);
     }
     throw new ApiError(res.status, detail);
   }
@@ -196,13 +245,34 @@ function qs(params: Record<string, string | number | undefined | null>): string 
 
 export const api = {
   // Auth
-  login: (username: string, password: string) =>
-    request<User>("/auth/login", {
+  login: async (username: string, password: string) => {
+    // The server rotates the session on successful auth and stamps a fresh
+    // CSRF secret into it. Drop any stale cached token before the call, and
+    // hydrate a fresh one right after so subsequent unsafe requests don't
+    // eat a 403/retry round-trip.
+    csrfToken = null;
+    const user = await request<User>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
-    }),
-  logout: () => request<void>("/auth/logout", { method: "POST" }),
+    });
+    try {
+      await getCsrfToken();
+    } catch {
+      // Non-fatal: the token will be fetched lazily on the first unsafe call.
+    }
+    return user;
+  },
+  logout: async () => {
+    try {
+      await request<void>("/auth/logout", { method: "POST" });
+    } finally {
+      // Session is gone on the server either way; wipe the cache so the next
+      // login starts clean.
+      csrfToken = null;
+    }
+  },
   me: () => request<User>("/auth/me"),
+  getCsrfToken: () => getCsrfToken(),
 
   // Users
   listUsers: (params: { team_id?: string } = {}) =>

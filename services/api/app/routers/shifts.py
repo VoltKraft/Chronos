@@ -277,7 +277,7 @@ def substitutes(
     viewer: User = Depends(current_user),
 ) -> list[User]:
     s = _get_shift(db, sid)
-    if not _can_manage_team(viewer, s.team_id) and not is_tl_or_above(viewer):
+    if not _can_manage_team(viewer, s.team_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
     exclude = {a.user_id for a in s.assignments if a.status == "assigned"}
     return shift_service.find_substitutes(db, shift=s, exclude=exclude, limit=limit)

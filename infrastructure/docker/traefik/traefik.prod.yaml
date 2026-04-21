@@ -1,0 +1,30 @@
+entryPoints:
+  web:
+    address: ":80"
+    # Redirect all plain HTTP to HTTPS.
+    http:
+      redirections:
+        entrypoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: letsencrypt
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+# Dashboard is deliberately disabled in production.
+api:
+  dashboard: false
+
+log:
+  level: INFO
+accessLog: {}
+
+ping: {}

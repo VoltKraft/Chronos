@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import current_user
 from app.models import User, Workflow
+from app.permissions import require_hr_or_admin
+from app.services import audit
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
@@ -58,7 +60,7 @@ def list_workflows(db: Session = Depends(get_db), _: User = Depends(current_user
 def create_workflow(
     payload: WorkflowCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(current_user),
+    user: User = Depends(require_hr_or_admin()),
 ) -> Workflow:
     wf = Workflow(
         name=payload.name,
@@ -67,6 +69,15 @@ def create_workflow(
         created_by=user.id,
     )
     db.add(wf)
+    db.flush()
+    audit.append(
+        db,
+        actor=user,
+        action="workflow.created",
+        target_type="workflow",
+        target_id=wf.id,
+        after={"name": wf.name, "version": wf.version},
+    )
     db.commit()
     db.refresh(wf)
     return wf
@@ -86,9 +97,10 @@ def update_workflow(
     workflow_id: uuid.UUID,
     payload: WorkflowUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(current_user),
+    user: User = Depends(require_hr_or_admin()),
 ) -> Workflow:
     wf = _get_or_404(db, workflow_id)
+    before = {"name": wf.name, "version": wf.version}
     changed = False
     if payload.name is not None:
         wf.name = payload.name
@@ -101,6 +113,15 @@ def update_workflow(
         changed = True
     if changed:
         wf.version += 1
+        audit.append(
+            db,
+            actor=user,
+            action="workflow.updated",
+            target_type="workflow",
+            target_id=wf.id,
+            before=before,
+            after={"name": wf.name, "version": wf.version},
+        )
     db.commit()
     db.refresh(wf)
     return wf
@@ -110,8 +131,16 @@ def update_workflow(
 def delete_workflow(
     workflow_id: uuid.UUID,
     db: Session = Depends(get_db),
-    _: User = Depends(current_user),
+    user: User = Depends(require_hr_or_admin()),
 ) -> None:
     wf = _get_or_404(db, workflow_id)
-    wf.deleted_at = datetime.utcnow()
+    wf.deleted_at = datetime.now(timezone.utc)
+    audit.append(
+        db,
+        actor=user,
+        action="workflow.deleted",
+        target_type="workflow",
+        target_id=wf.id,
+        before={"name": wf.name, "version": wf.version},
+    )
     db.commit()

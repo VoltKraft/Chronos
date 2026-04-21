@@ -7,8 +7,9 @@ Run inside the container, e.g.:
 
 import argparse
 import json
+import logging
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from getpass import getpass
 from pathlib import Path
 
@@ -17,8 +18,10 @@ from sqlalchemy import select
 from app.db import SessionLocal
 from app.models import Department, LeaveRequest, Preference, Project, Shift, Team, User
 from app.models.enums import LeaveStatus, LeaveType, PreferenceType, Role, ShiftType
-from app.security import hash_password
+from app.security import hash_password, validate_password_strength
 from app.services import audit
+
+log = logging.getLogger(__name__)
 
 
 def _cmd_create_admin(args: argparse.Namespace) -> int:
@@ -26,6 +29,14 @@ def _cmd_create_admin(args: argparse.Namespace) -> int:
     password = args.password or getpass("Password: ")
     if not password:
         print("password is required", file=sys.stderr)
+        return 2
+
+    # H-04: enforce the policy on new admin credentials unless the operator
+    # explicitly opts out (e.g. one-off rescue flows).
+    try:
+        validate_password_strength(password, skip_policy=bool(args.skip_policy))
+    except ValueError as exc:
+        print(f"password rejected: {exc}", file=sys.stderr)
         return 2
 
     with SessionLocal() as db:
@@ -39,6 +50,8 @@ def _cmd_create_admin(args: argparse.Namespace) -> int:
             first_name=args.first_name,
             last_name=args.last_name,
             role=Role.admin.value,
+            password_changed_at=datetime.now(timezone.utc),
+            must_rotate_password=False,
         )
         db.add(user)
         db.commit()
@@ -49,6 +62,18 @@ def _cmd_create_admin(args: argparse.Namespace) -> int:
 def _cmd_seed_demo(args: argparse.Namespace) -> int:
     """Load a small but realistic dataset for development / demos."""
     today = date.today()
+
+    # H-04: the seed intentionally plants weak passwords to keep the docs and
+    # muscle-memory short. Bypass the policy explicitly, flag every seeded
+    # account for forced rotation, and shout about it so the operator never
+    # ships these defaults.
+    validate_password_strength("admin", skip_policy=True)
+    log.warning(
+        "seed-demo planted weak default passwords; every seeded user is flagged "
+        "with must_rotate_password=True and must rotate before anything real"
+    )
+    now = datetime.now(timezone.utc)
+
     with SessionLocal() as db:
         if db.scalar(select(User).where(User.email == "admin@chronos.local")) is None:
             admin = User(
@@ -57,6 +82,8 @@ def _cmd_seed_demo(args: argparse.Namespace) -> int:
                 first_name="Sys",
                 last_name="Admin",
                 role=Role.admin.value,
+                password_changed_at=now,
+                must_rotate_password=True,
             )
             db.add(admin)
             db.flush()
@@ -96,6 +123,8 @@ def _cmd_seed_demo(args: argparse.Namespace) -> int:
                 role=role.value,
                 department_id=dep.id,
                 team_id=team.id if role != Role.hr else None,
+                password_changed_at=now,
+                must_rotate_password=True,
             )
             db.add(u)
             db.flush()
@@ -202,7 +231,13 @@ def main(argv: list[str] | None = None) -> int:
     admin.add_argument("--password", help="Omit to be prompted interactively")
     admin.add_argument("--first-name", dest="first_name")
     admin.add_argument("--last-name", dest="last_name")
-    admin.set_defaults(func=_cmd_create_admin)
+    admin.add_argument(
+        "--skip-policy",
+        dest="skip_policy",
+        action="store_true",
+        help="Bypass the H-04 password strength policy (dangerous — only for rescue flows)",
+    )
+    admin.set_defaults(func=_cmd_create_admin, skip_policy=False)
 
     seed = sub.add_parser("seed-demo", help="Load a demo dataset")
     seed.set_defaults(func=_cmd_seed_demo)

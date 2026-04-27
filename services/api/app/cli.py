@@ -6,6 +6,7 @@ Run inside the container, e.g.:
 """
 
 import argparse
+import inspect
 import json
 import logging
 import sys
@@ -13,6 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from getpass import getpass
 from pathlib import Path
 
+from fastapi.params import Depends as DependsMarker
 from sqlalchemy import select
 
 from app.db import SessionLocal
@@ -209,6 +211,86 @@ def _cmd_dump_openapi(args: argparse.Namespace) -> int:
     return 0
 
 
+_ROUTE_MATRIX_HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
+
+
+def _route_matrix_guards(fn) -> list[str]:
+    """Return the RBAC-relevant dependency names from ``fn``'s signature.
+
+    Walks ``inspect.signature(fn)`` looking at parameter defaults that are
+    ``fastapi.params.Depends`` markers, and pulls the dependency callable's
+    ``__name__``. That surfaces ``current_user`` and every ``require_*``
+    factory (which rebrand themselves via ``_dep.__name__`` in
+    ``app.permissions.require_roles``), so the audit matrix shows exactly
+    which guard each endpoint runs behind.
+    """
+    guards: list[str] = []
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return guards
+    for param in sig.parameters.values():
+        default = param.default
+        if isinstance(default, DependsMarker) and default.dependency is not None:
+            name = getattr(default.dependency, "__name__", None)
+            if name:
+                guards.append(name)
+    return guards
+
+
+def _cmd_dump_route_matrix(args: argparse.Namespace) -> int:
+    """Emit a method × path × guard matrix for every registered route.
+
+    Phase-1 security hardening relies on a manual audit of RBAC coverage.
+    This command dumps the same shape reviewers build by hand: one row per
+    (method, path), listing the dependency callables that guard the handler
+    (``current_user``, ``require_hr_or_admin``, …). Output is JSON by default
+    or a Markdown table when ``--format markdown`` is passed; either can be
+    diffed in CI or pasted into a PR.
+    """
+    from fastapi.routing import APIRoute
+
+    from app.main import app
+
+    rows: list[dict[str, object]] = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        for method in sorted(route.methods or set()):
+            if method not in _ROUTE_MATRIX_HTTP_METHODS:
+                continue
+            rows.append(
+                {
+                    "method": method,
+                    "path": route.path,
+                    "guards": _route_matrix_guards(route.endpoint),
+                    "module": getattr(route.endpoint, "__module__", ""),
+                    "name": getattr(route.endpoint, "__qualname__", ""),
+                }
+            )
+    rows.sort(key=lambda r: (str(r["path"]), str(r["method"])))
+
+    output_path = Path(args.output) if args.output else None
+
+    if args.format == "markdown":
+        lines = ["| Method | Path | Guards | Handler |", "| --- | --- | --- | --- |"]
+        for row in rows:
+            guards = ", ".join(str(g) for g in row["guards"]) or "—"
+            handler = f"{row['module']}:{row['name']}"
+            lines.append(f"| {row['method']} | `{row['path']}` | {guards} | `{handler}` |")
+        text = "\n".join(lines) + "\n"
+    else:
+        text = json.dumps(rows, indent=2, sort_keys=False) + "\n"
+
+    if output_path is None:
+        sys.stdout.write(text)
+    else:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(text)
+        print(f"wrote {output_path} ({len(rows)} routes)")
+    return 0
+
+
 def _cmd_set_role(args: argparse.Namespace) -> int:
     email = args.email.strip().lower()
     with SessionLocal() as db:
@@ -263,6 +345,23 @@ def main(argv: list[str] | None = None) -> int:
         help="Output format (default: inferred from file extension, else yaml)",
     )
     openapi.set_defaults(func=_cmd_dump_openapi)
+
+    matrix = sub.add_parser(
+        "dump-route-matrix",
+        help="Dump method × path × guard matrix for every registered route",
+    )
+    matrix.add_argument(
+        "--output",
+        default=None,
+        help="Target path (default: write to stdout)",
+    )
+    matrix.add_argument(
+        "--format",
+        choices=("json", "markdown"),
+        default="json",
+        help="Output format (default: json)",
+    )
+    matrix.set_defaults(func=_cmd_dump_route_matrix)
 
     args = parser.parse_args(argv)
     return args.func(args)

@@ -8,7 +8,7 @@ Alembic against a real database. Mirrors the style used by
 from pathlib import Path
 
 ALEMBIC_VERSIONS = (
-    Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    Path(__file__).resolve().parent.parent.parent / "alembic" / "versions"
 )
 
 

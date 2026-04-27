@@ -1,16 +1,22 @@
-"""Shared pytest configuration.
+"""Pure-logic pytest configuration.
 
-The tests here focus on pure business logic (state machines, hash chain,
-ICS rendering, RBAC). They set minimal env vars so importing
-``app.*`` does not try to reach a live database.
+Tests in this subtree cover state machines, hash chain maths, ICS
+rendering, RBAC predicates, and similar helpers — none of them need a
+live database. We poke in minimal env defaults so importing
+``app.*`` does not raise during ``Settings`` validation.
+
+Integration tests that do need a live Postgres live under
+``tests/integration`` and manage their own environment there.
 """
 
 import os
 import pathlib
 import sys
 
-# Ensure the ``app`` package on the project is importable without installation.
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+# Ensure the ``app`` package is importable without installing the project.
+# ``__file__`` is ``services/api/tests/unit/conftest.py``; three ``parent``
+# hops land us on ``services/api``.
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

@@ -24,6 +24,11 @@ dev = [
   "pytest-asyncio>=0.24",
   "httpx>=0.27",
 ]
+# Optional: integration suite. Opt-in because it requires Docker-in-reach for
+# testcontainers (or a pre-provisioned TEST_DATABASE_URL in CI).
+integration = [
+  "testcontainers[postgres]>=4.8",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -33,7 +38,10 @@ build-backend = "setuptools.build_meta"
 include = ["app*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# Default invocation (`pytest`) runs the fast pure-logic suite only. The
+# integration tree boots a throwaway Postgres + Alembic + TestClient and must
+# be invoked explicitly via `pytest tests/integration`.
+testpaths = ["tests/unit"]
 addopts = "-ra"
 filterwarnings = [
   "error",

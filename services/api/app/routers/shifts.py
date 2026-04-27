@@ -99,6 +99,18 @@ def _get_shift(db: Session, sid: uuid.UUID) -> Shift:
     return s
 
 
+def _shift_snapshot(s: Shift) -> dict:
+    return {
+        "team_id": str(s.team_id),
+        "service_date": s.service_date.isoformat(),
+        "shift_type": s.shift_type,
+        "start_time": s.start_time.isoformat(),
+        "end_time": s.end_time.isoformat(),
+        "required_headcount": s.required_headcount,
+        "project_id": str(s.project_id) if s.project_id else None,
+    }
+
+
 @router.get("", response_model=list[ShiftOut])
 def list_shifts(
     db: Session = Depends(get_db),
@@ -147,6 +159,15 @@ def create_shift(
         project_id=payload.project_id,
     )
     db.add(s)
+    db.flush()
+    audit.append(
+        db,
+        actor=viewer,
+        action=AuditAction.shift_create,
+        target_type="shift",
+        target_id=s.id,
+        after=_shift_snapshot(s),
+    )
     db.commit()
     db.refresh(s)
     return s
@@ -162,8 +183,21 @@ def update_shift(
     s = _get_shift(db, sid)
     if not _can_manage_team(viewer, s.team_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
-    for key, value in payload.model_dump(exclude_none=True).items():
-        setattr(s, key, value)
+    before = _shift_snapshot(s)
+    changes = payload.model_dump(exclude_none=True)
+    if changes:
+        for key, value in changes.items():
+            setattr(s, key, value)
+        db.flush()
+        audit.append(
+            db,
+            actor=viewer,
+            action=AuditAction.shift_update,
+            target_type="shift",
+            target_id=s.id,
+            before=before,
+            after=_shift_snapshot(s),
+        )
     db.commit()
     db.refresh(s)
     return s
@@ -178,7 +212,16 @@ def delete_shift(
     s = _get_shift(db, sid)
     if not _can_manage_team(viewer, s.team_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+    before = _shift_snapshot(s)
     s.deleted_at = datetime.now(timezone.utc)
+    audit.append(
+        db,
+        actor=viewer,
+        action=AuditAction.shift_delete,
+        target_type="shift",
+        target_id=s.id,
+        before=before,
+    )
     db.commit()
 
 

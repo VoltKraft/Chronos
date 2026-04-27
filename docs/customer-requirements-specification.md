@@ -1,14 +1,13 @@
 # Chronos — Customer Requirements Specification (CRS)
 
-Version: 1.2  
-Date: 2025-11-15  
-Company: Intrabit GmbH
+Version: 1.3  
+Date: 2026-04-21  
 
 ## 1. Goal Definition
 
 ### 1.1 Initial Situation
 
-Intrabit GmbH currently uses an Excel spreadsheet for shift and leave planning, which can only be edited by one person at a time. Leave requests are submitted on paper and must be manually approved by a delegate and then by HR. This results in:
+The adopting organization currently uses an Excel spreadsheet for shift and leave planning, which can only be edited by one person at a time. Leave requests are submitted on paper and must be manually approved by a delegate and then by HR. This results in:
 
 - Long processing times
 - Lack of transparency
@@ -31,7 +30,7 @@ Chronos is a digital, web-based tool that:
 
 ### 2.1 Application Domain
 
-Chronos will be used as an internal company tool at Intrabit GmbH. In the future, it can be adopted by other companies as an open-source solution.
+Chronos will be used as an internal company tool at the adopting organization. It is released as open source so other companies can adopt it on the same terms.
 
 Target groups:
 

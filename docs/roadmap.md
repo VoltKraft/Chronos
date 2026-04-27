@@ -1,8 +1,10 @@
 # Chronos Roadmap — Hardening & Phase 2 Plan
 
 > Audience: autonomous agent teams picking up independent work items.
-> Status as of 2026-04-20. Drops OIDC to the final wave per project direction
-> (external IdP only — no internal OIDC provider).
+> Status as of 2026-04-21. Wave A (Security hardening, H-01..H-10) is merged
+> and tracked as **Done** — see the "Wave A status" note below. Drops OIDC
+> to the final wave per project direction (external IdP only — no internal
+> OIDC provider).
 
 ## Working rules for all waves
 
@@ -27,10 +29,13 @@ commits (`feat(H-01): …`).
 
 ---
 
-## Wave A — Security hardening (P0, ship first)
+## Wave A — Security hardening (P0, ship first) — **Status: Done (2026-04-21)**
 
-No Wave-B item may merge until Wave A is complete. These are all small, surgical
-fixes on top of `WIP`.
+All ten items (H-01..H-10) merged on `WIP` in commit
+`feat(security): complete Wave A P0 hardening (H-01..H-10)` and are in place
+today. The text below is kept as the historical acceptance record, not a
+to-do list; new security items should be tracked as fresh IDs in a
+follow-up wave.
 
 ### H-01 — Lock `/api/workflows` to HR/admin [area: api/routers]
 **Why:** any logged-in employee can create/update/delete approval workflows
@@ -109,6 +114,14 @@ routers; bind dashboard to loopback only via an `entrypoints.web_internal`
 interface (or drop dashboard entirely in prod).
 **Accept:** `curl -H 'Host: evil.example' https://…` returns 404; cert issues
 successfully against Let's Encrypt staging in a rehearsal.
+**Shipped (2026-04-21):** `dynamic.prod/services.yaml.template` now carries
+`Host(\`${PUBLIC_HOST}\`)` on both routers and a `chronos-security-headers`
+middleware (HSTS 2y + preload, X-Frame-Options DENY, X-Content-Type-Options
+nosniff, strict Referrer-Policy, conservative Permissions-Policy, stripped
+`Server` header). `traefik.prod.yaml` redirects `:80` → `:443` and points
+`websecure` at the `letsencrypt` resolver; the resolver is parameterised in
+`compose.prod.yaml` so `ACME_CA_SERVER` can flip between staging and prod.
+Dashboard is already disabled in prod (`traefik.prod.yaml: api.dashboard=false`).
 
 ### H-07 — Audit coverage for config mutations [area: api/services]
 **Why:** FS §7.1 requires all configuration changes in the audit chain.
@@ -122,6 +135,12 @@ diffs against an allow-list of audit-exempt endpoints.
 **Accept:** test fails when an audited endpoint is added without an
 `audit.append` call; baseline coverage doc in `docs/audit-events.md`
 (auto-generated).
+**Shipped (2026-04-21):** `tests/test_audit_coverage.py` combines explicit
+regression tests for every audited endpoint with a route spider that fails
+when a new `POST/PUT/PATCH/DELETE` lacks `audit.append` and is not in
+`AUDIT_EXEMPT`. Shift and Preference CRUD endpoints were the last gap and
+now call `audit.append` with dedicated `AuditAction.shift_*` /
+`AuditAction.preference_*` values.
 
 ### H-08 — Replace `datetime.utcnow()` everywhere [area: api]
 **Why:** deprecated in 3.12, timezone-naïve, risks wrong audit timestamps.
@@ -242,6 +261,15 @@ mounted `/backups/` volume with timestamped files; daily cron via
 `docs/backup-restore.md` and verify by a rehearsal on a throwaway env.
 **Accept:** a backup file appears after the configured schedule; documented
 `pg_restore` call reproduces data into an empty DB.
+**Shipped (2026-04-21):** `compose.prod.yaml` now carries a `backup` sidecar
+on `postgres:18-alpine` that runs `infrastructure/docker/backup/run.sh` in a
+loop — `pg_dump -Fc --no-owner --no-acl` every `BACKUP_INTERVAL_SECONDS`
+(default 86400) into the `chronos_backups` volume, pruned to the
+`BACKUP_RETENTION_COUNT` newest files (default 30). Credentials are injected
+via `PG*` env vars from `.env.prod`; no `.pgpass` inside the container.
+`docs/backup-restore.md` covers verification, off-host copying, a throwaway-
+Postgres restore drill (includes a `verify-audit` round-trip), the
+destructive live-replacement path, and RPO/RTO guidance.
 
 ### O-03 — Integration test harness [area: tests]
 **Why:** only pure-logic tests exist; auth, audit, router flows unverified.
@@ -251,6 +279,22 @@ flows (login → create leave → approve → check audit → export). Keep pure
 tests in `tests/unit/`.
 **Accept:** `pytest tests/integration -q` green in CI; runtime under 90s;
 adds a GitHub Actions matrix row.
+**Shipped (2026-04-21):** the pure-logic tests were moved to
+`services/api/tests/unit/` and a new `services/api/tests/integration/`
+harness brings up Postgres either via `testcontainers[postgres]` (local
+runs) or via the `TEST_DATABASE_URL` env var (CI uses GitHub Actions'
+`services: postgres:18-alpine`). The harness runs Alembic to head,
+truncates between tests, and ships with three scenarios:
+  1. employee → HR approve → audit-chain verify → GDPR export;
+  2. CSRF header is mandatory on state-changing requests;
+  3. unauthenticated probe of `/auth/me` + `/healthz`.
+Runtime is ~2s once the Postgres image is cached. CI now gates on
+`api-integration-tests` as well as `api-tests`. Writing the harness also
+flushed out a latent bug: `audit_events.seq` had no default/sequence/
+identity, so the first real `audit.append` insert died with a
+`NotNullViolation`. Fixed in Alembic revision `0006` by adding
+`GENERATED BY DEFAULT AS IDENTITY` to the column and matching the model
+(`Identity(always=False)`).
 
 ### O-04 — Frontend tests [area: frontend]
 **Why:** no `*.test.tsx` exists.
@@ -275,6 +319,11 @@ only workflows/auth/health). Mislead agents and reviewers.
 reference it from `docs/architecture.md`; CI fails on drift.
 **Accept:** committed matrix reflects the 14 routers; CI drift check in
 place.
+**Partial (2026-04-21):** the `python -m app.cli dump-route-matrix` command
+is implemented (`--format markdown|json`, `--output <path>` or stdout) and
+emits method × path × guard (`current_user` / `require_roles_*`) rows. Still
+open: commit the generated `docs/api-endpoints.md` and add a CI drift check
+alongside the OpenAPI drift check.
 
 ### O-07 — Worker healthcheck + graceful shutdown [area: worker]
 **Why:** no HEALTHCHECK; SIGTERM handling unclear.

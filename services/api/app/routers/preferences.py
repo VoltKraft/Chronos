@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import current_user
 from app.models import Preference, User
-from app.models.enums import PreferenceType
+from app.models.enums import AuditAction, PreferenceType
 from app.permissions import is_hr_or_admin
+from app.services import audit
 
 router = APIRouter(prefix="/api/preferences", tags=["preferences"])
 
@@ -50,6 +51,16 @@ def list_preferences(
     )
 
 
+def _preference_snapshot(pref: Preference) -> dict[str, Any]:
+    return {
+        "user_id": str(pref.user_id),
+        "preference_type": pref.preference_type,
+        "payload": pref.payload,
+        "effective_from": pref.effective_from.isoformat(),
+        "effective_to": pref.effective_to.isoformat() if pref.effective_to else None,
+    }
+
+
 @router.post("", response_model=PreferenceOut, status_code=status.HTTP_201_CREATED)
 def create_preference(
     payload: PreferenceIn, db: Session = Depends(get_db), viewer: User = Depends(current_user)
@@ -64,6 +75,15 @@ def create_preference(
         effective_to=payload.effective_to,
     )
     db.add(pref)
+    db.flush()
+    audit.append(
+        db,
+        actor=viewer,
+        action=AuditAction.preference_create,
+        target_type="preference",
+        target_id=pref.id,
+        after=_preference_snapshot(pref),
+    )
     db.commit()
     db.refresh(pref)
     return pref
@@ -78,5 +98,14 @@ def delete_preference(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
     if pref.user_id != viewer.id and not is_hr_or_admin(viewer):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+    before = _preference_snapshot(pref)
     pref.deleted_at = datetime.now(timezone.utc)
+    audit.append(
+        db,
+        actor=viewer,
+        action=AuditAction.preference_delete,
+        target_type="preference",
+        target_id=pref.id,
+        before=before,
+    )
     db.commit()

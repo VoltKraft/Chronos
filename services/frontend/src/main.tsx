@@ -9,6 +9,7 @@ import { AuthProvider } from "./auth/AuthProvider";
 import { RequireAuth, RequireRole } from "./auth/RequireAuth";
 
 import AuditPage from "./pages/AuditPage";
+import ChangePassword from "./pages/ChangePassword";
 import Dashboard from "./pages/Dashboard";
 import LeaveInbox from "./pages/LeaveInbox";
 import Login from "./pages/Login";
@@ -74,6 +75,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               element={
                 <RequireAuth>
                   <PreferencesPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="change-password"
+              element={
+                <RequireAuth>
+                  <ChangePassword />
                 </RequireAuth>
               }
             />

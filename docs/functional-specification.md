@@ -1,8 +1,8 @@
 # Chronos — Functional Specification (FS)
 
-Status: Draft  
-Version: 0.2  
-Last Updated: 2025-11-15
+Status: Phase-1 baseline (Wave A hardened)  
+Version: 1.0  
+Last Updated: 2026-04-21
 
 ## Contents
 

@@ -61,4 +61,4 @@ This project is provided “as is.” To the maximum extent permitted by law, al
 
 Non‑professional notice: the maintainer is not a professional application developer; this is a personal, hobby effort provided in good faith without guarantees or support obligations.
 
-Last updated: 2025‑11‑13
+Last updated: 2026‑04‑21

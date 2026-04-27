@@ -7,19 +7,20 @@ export default function App() {
   const auth = useAuth();
   const navigate = useNavigate();
   const user = auth.status === "authenticated" ? auth.user : null;
+  const mustRotate = user?.must_rotate_password ?? false;
 
   const items: NavItem[] = [
-    { to: "/dashboard", label: "Dashboard", show: !!user },
-    { to: "/leave", label: "My leave", show: !!user },
-    { to: "/leave/new", label: "Request leave", show: !!user },
-    { to: "/inbox", label: "Approvals", show: !!user },
-    { to: "/shifts", label: "Shifts", show: !!user },
-    { to: "/preferences", label: "Preferences", show: !!user },
-    { to: "/planner", label: "Planner", show: isTlOrAbove(user) },
-    { to: "/reports", label: "Reports", show: isTlOrAbove(user) },
-    { to: "/users", label: "Users", show: isHrOrAdmin(user) },
-    { to: "/audit", label: "Audit", show: isHrOrAdmin(user) },
-    { to: "/workflows", label: "Workflows", show: isHrOrAdmin(user) },
+    { to: "/dashboard", label: "Dashboard", show: !!user && !mustRotate },
+    { to: "/leave", label: "My leave", show: !!user && !mustRotate },
+    { to: "/leave/new", label: "Request leave", show: !!user && !mustRotate },
+    { to: "/inbox", label: "Approvals", show: !!user && !mustRotate },
+    { to: "/shifts", label: "Shifts", show: !!user && !mustRotate },
+    { to: "/preferences", label: "Preferences", show: !!user && !mustRotate },
+    { to: "/planner", label: "Planner", show: isTlOrAbove(user) && !mustRotate },
+    { to: "/reports", label: "Reports", show: isTlOrAbove(user) && !mustRotate },
+    { to: "/users", label: "Users", show: isHrOrAdmin(user) && !mustRotate },
+    { to: "/audit", label: "Audit", show: isHrOrAdmin(user) && !mustRotate },
+    { to: "/workflows", label: "Workflows", show: isHrOrAdmin(user) && !mustRotate },
   ];
 
   const handleLogout = async () => {
@@ -54,6 +55,9 @@ export default function App() {
             <>
               <span className="user-email">{user.email}</span>
               <span className="user-role">{user.role}</span>
+              <NavLink to="/change-password" className="nav-link">
+                Change password
+              </NavLink>
               <button className="link-button" onClick={handleLogout}>
                 Sign out
               </button>

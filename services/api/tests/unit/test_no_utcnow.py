@@ -7,7 +7,7 @@ that silently compares wrong against aware datetimes. Use
 
 from pathlib import Path
 
-APP_ROOT = Path(__file__).resolve().parent.parent / "app"
+APP_ROOT = Path(__file__).resolve().parent.parent.parent / "app"
 
 
 def test_no_datetime_utcnow_in_app_tree():

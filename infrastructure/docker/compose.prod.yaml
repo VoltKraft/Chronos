@@ -10,6 +10,7 @@ volumes:
   chronos_db:
   chronos_traefik_acme:
   chronos_traefik_dynamic:
+  chronos_backups:
 
 services:
   db:
@@ -50,6 +51,34 @@ services:
       COOKIE_SAMESITE: ${COOKIE_SAMESITE}
       SESSION_MAX_AGE_SECONDS: ${SESSION_MAX_AGE_SECONDS}
       LOG_LEVEL: ${LOG_LEVEL}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # O-02: pg_dump sidecar. Runs the loop in backup/run.sh, writing
+  # pg_restore-compatible archives to the chronos_backups volume. See
+  # docs/backup-restore.md for the restore procedure.
+  backup:
+    image: postgres:18-alpine
+    container_name: chronos_backup
+    networks:
+      - backend
+    env_file:
+      - .env.prod
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_COUNT: ${BACKUP_RETENTION_COUNT:-30}
+      BACKUP_DIR: /backups
+    volumes:
+      - chronos_backups:/backups
+      - ./backup/run.sh:/usr/local/bin/run-backup.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/run-backup.sh"]
     depends_on:
       db:
         condition: service_healthy

@@ -1,25 +1,34 @@
-# Prod routing — HTTPS on entrypoint "websecure", TLS enabled.
-# NOTE: Add `Host(...)` to both rules before going live to reject traffic with
-# arbitrary Host headers, e.g.:
-#   rule: "Host(`shifts.example.com`) && (PathPrefix(`/api`) || PathPrefix(`/auth`))"
-# TLS certs must be provisioned via a cert resolver (ACME) or static files —
-# configure under tls.certificates / tls.stores in this directory.
+# Prod routing — HTTPS on entrypoint "websecure", TLS via ACME (resolver
+# "letsencrypt" is configured in compose.prod.yaml as CLI args to Traefik).
+#
+# The compose.prod.yaml init container (traefik-config) expands the
+# PUBLIC_HOST variable from .env.prod into this file before Traefik boots;
+# after that every request with a Host header other than PUBLIC_HOST is
+# answered with 404.
+# Plain HTTP on :80 is redirected to HTTPS by the entryPoint definition in
+# traefik.prod.yaml.
 http:
   routers:
     chronos-api:
-      rule: "PathPrefix(`/api`) || PathPrefix(`/auth`) || Path(`/healthz`) || Path(`/readyz`)"
+      rule: "Host(`${PUBLIC_HOST}`) && (PathPrefix(`/api`) || PathPrefix(`/auth`) || Path(`/healthz`) || Path(`/readyz`))"
       entryPoints:
         - websecure
       service: chronos-api
+      middlewares:
+        - chronos-security-headers
       priority: 10
-      tls: {}
+      tls:
+        certResolver: letsencrypt
     chronos-fe:
-      rule: "PathPrefix(`/`)"
+      rule: "Host(`${PUBLIC_HOST}`)"
       entryPoints:
         - websecure
       service: chronos-fe
+      middlewares:
+        - chronos-security-headers
       priority: 1
-      tls: {}
+      tls:
+        certResolver: letsencrypt
   services:
     chronos-api:
       loadBalancer:
@@ -29,3 +38,21 @@ http:
       loadBalancer:
         servers:
           - url: "http://frontend:80"
+  middlewares:
+    # Security headers applied to every response. HSTS matches the 2-year
+    # preload-list requirement so the domain can be submitted to
+    # hstspreload.org once ACME issues real certs. Content-Security-Policy
+    # is intentionally not emitted here — the SPA needs a tailored policy
+    # that is easier to maintain in the nginx image (services/frontend).
+    chronos-security-headers:
+      headers:
+        stsSeconds: 63072000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        permissionsPolicy: "geolocation=(), camera=(), microphone=(), interest-cohort=()"
+        # Remove the "Server: traefik" fingerprint from outgoing responses.
+        customResponseHeaders:
+          Server: ""

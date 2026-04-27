@@ -101,6 +101,7 @@ Run them via `docker compose … exec api python -m app.cli <cmd>`:
 | `set-role --email ... --role hr` | Promote/demote a user. |
 | `verify-audit` | Recompute the audit hash chain; non-zero exit on tamper. |
 | `dump-openapi --output docs/api/openapi/api/openapi.yaml` | Refresh the committed OpenAPI contract. |
+| `dump-route-matrix --format markdown` | Emit a method × path × guard matrix for RBAC audits. |
 
 For the full inventory of containers, images, and endpoints see [`docs/architecture.md`](docs/architecture.md#implementation-status-phase-1).
 
@@ -160,6 +161,16 @@ For full license text, see:
 - [x] GDPR data export (F7 §7.1)
 - [x] Role-specific SPA (Employee, Team Lead, HR, Admin)
 - [x] Docker-based deployment (5-container compose stack)
+- [x] Wave A P0 security hardening — rate-limit + lockout, session
+  rotation + idle timeout, Argon2id + password policy + forced rotation,
+  cross-team leak fix, CSRF double-submit, UTC timestamps, audit
+  coverage spider (see `docs/roadmap.md` for H-01..H-10)
+- [x] Prod TLS (ACME) + `Host(...)` guards + security headers on Traefik (H-06)
+- [x] pg_dump backup sidecar + restore runbook (O-02) — see
+  [`docs/backup-restore.md`](docs/backup-restore.md)
+- [x] Integration test harness over a throwaway Postgres (O-03) —
+  `pytest tests/integration`; harness uses `testcontainers[postgres]`
+  locally and GitHub Actions' `services: postgres:18-alpine` in CI
 - [ ] OpenID Connect (OIDC) integration
 - [ ] Multi-tenant support
 - [ ] Kubernetes-ready architecture

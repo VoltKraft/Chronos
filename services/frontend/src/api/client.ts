@@ -99,6 +99,7 @@ export type User = {
   time_zone: string;
   department_id: string | null;
   team_id: string | null;
+  must_rotate_password: boolean;
 };
 
 export type UserDetail = User & { created_at: string; updated_at: string };
@@ -299,6 +300,11 @@ export const api = {
     request<void>(`/api/users/${id}/password`, {
       method: "PUT",
       body: JSON.stringify({ new_password }),
+    }),
+  changeMyPassword: (current_password: string, new_password: string) =>
+    request<void>("/api/users/me/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password, new_password }),
     }),
   deactivateUser: (id: string) => request<void>(`/api/users/${id}`, { method: "DELETE" }),
   exportMyData: (id: string) => request<string>(`/api/users/${id}/export`),
